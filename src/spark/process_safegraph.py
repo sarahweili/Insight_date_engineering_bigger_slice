@@ -143,7 +143,6 @@ df_comp_output.write\
         .option('password', 'postgres')\
         .option('driver','org.postgresql.Driver')\
         .save()
-                                                                                                                              177,6         Bot
 
 
 
