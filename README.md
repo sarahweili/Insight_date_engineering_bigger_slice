@@ -1,2 +1,2 @@
-# restaurant POI data enrichment
-## Built an automated big data pipeline that enriches POI datasets to enable data scientists to optimize POI recommender with an extensive pool of feature variables.
+# BiggerSlice
+## Built a big data pipeline that enables restaurateurs to identify and analyze competitors based on integrated alternative data sources.
