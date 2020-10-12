@@ -1,5 +1,5 @@
 from pyspark.sql import SparkSession, Row
-from pyspark.sql.functions import col, udf, collect_list, explode, to_json, desc, rank, asc, size, monotonically_increasing_id
+from pyspark.sql.functions import col, split, udf, collect_list, explode, to_json, desc, rank, asc, size, monotonically_increasing_id
 from pyspark.sql.types import MapType, StringType, IntegerType, ArrayType
 from collections import Counter
 from pyspark.sql.window import Window
@@ -68,6 +68,42 @@ df = spark.read.option("header",True).\
 
 
 df = df.where(col('visitor_home_cbgs') != '{}')
+
+
+#get monthly visit for each location
+df_footprint = df.withColumn('year', split(col('date_range_start'),'-').getItem(0))\
+        .withColumn('year', col('year').cast(IntegerType()))\
+        .withColumn('month', split(col('date_range_start'),'-').getItem(1))\
+        .withColumn('month', col('month').cast(IntegerType()))\
+        .withColumn('raw_visit_counts', col('raw_visit_counts').cast(IntegerType()))\
+        .select('safegraph_place_id','year','month','raw_visit_counts')
+
+df_mapping = spark.read.format("jdbc")\
+        .option("url", "jdbc:postgresql://10.0.0.10:5432/poi_db")\
+        .option("dbtable", "mapping_tb")\
+        .option("user", "postgres")\
+        .option('password','postgres')\
+        .option("driver", "org.postgresql.Driver")\
+        .load()
+
+
+df_footprint_mapped = df_footprint.join(df_mapping, df_footprint.safegraph_place_id == df_mapping.sg_id, 'inner')\
+        .withColumn('footprint_id',monotonically_increasing_id())\
+        .select('footprint_id','id','year','month','raw_visit_counts')
+
+df_footprint_mapped.write\
+        .format('jdbc')\
+        .mode('overwrite')\
+        .option('url', 'jdbc:postgresql://10.0.0.10:5432/poi_db')\
+        .option('dbtable', 'footprint_tb')\
+        .option('user','postgres')\
+        .option('password', 'postgres')\
+        .option('driver','org.postgresql.Driver')\
+        .save()
+
+
+
+
 
 #transform the dataset to get top 10 restaurants each census block residents visit most frequently. 
 df_by_id = df.groupby('safegraph_place_id').agg(collect_list(col('visitor_home_cbgs')).alias('merged'))
