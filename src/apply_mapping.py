@@ -19,14 +19,13 @@ def write_psql(df, tb_name):
         return print(tb_name, ' is saved!')
 
 def read_psql(tb_name):
-        df = spark.read.format('jdbc')\
-        .mode('overwrite')\
-        .option('url', 'jdbc:postgresql://10.0.0.10:5432/poi_db')\
-        .option('dbtable', tb_name)\
-        .option('user','postgres')\
-        .option('password', 'postgres')\
-        .option('driver','org.postgresql.Driver')\
-        .save()
+        df = spark.read.format("jdbc")\
+        .option("url", "jdbc:postgresql://10.0.0.10:5432/poi_db")\
+        .option("dbtable", tb_name)\
+        .option("user", "postgres")\
+        .option('password','postgres')\
+        .option("driver", "org.postgresql.Driver")\
+        .load()
         return df
 
 
