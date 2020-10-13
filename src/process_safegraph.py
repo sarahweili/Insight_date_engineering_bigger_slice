@@ -4,8 +4,10 @@ from pyspark.sql.types import MapType, StringType, IntegerType, ArrayType
 from collections import Counter
 from pyspark.sql.window import Window
 
+
 spark = SparkSession.builder.appName("safegraph").getOrCreate()
 spark.sparkContext.setLogLevel("ERROR")
+
 
 
 #process safegraph poi data
@@ -16,7 +18,7 @@ df_poi = spark.read.option("header",True)\
         .csv("s3a://sg-poi-data/poi-data/*.csv")
 
 #find all restaurants
-df = df_poi.where(col('naics_code').like('7225%')\
+df_poi = df_poi.where(col('naics_code').like('7225%')\
         & col('category_tags').isNotNull()\
         & col('postal_code').isNotNull())
 
@@ -31,7 +33,7 @@ def split_tags(tags_str):
 
 udf_split_tags = udf(split_tags, ArrayType(StringType()))
 
-df_1 = df.withColumn('category_tags', udf_split_tags(col('category_tags')))
+df_1 = df_poi.withColumn('category_tags', udf_split_tags(col('category_tags')))
 
 tags = spark.read.option("header", True)\
         .csv("s3a://sg-poi-data/cuisine_tags.csv").collect()
@@ -57,41 +59,44 @@ df_tags = df_2.select('safegraph_place_id', explode(col('cuisine_tags')))
 df_tag_output = df_tags.withColumn('id', monotonically_increasing_id())
 
 
+#save table to postgres
+df_tag_output.write\
+        .format('jdbc')\
+        .mode('overwrite')\
+        .option('url', 'jdbc:postgresql://10.0.0.10:5432/poi_db')\
+        .option('dbtable', 'tag_tb')\
+        .option('user','postgres')\
+        .option('password', 'postgres')\
+        .option('driver','org.postgresql.Driver')\
+        .save()
+
+
 
 
 #process foot traffic data
 
 #load foot traffic data from S3
-df = spark.read.option("header",True).\
+df_ft = spark.read.option("header",True).\
         option("escape", '"').\
         csv("s3a://sg-foot-traffic-data/*/*.csv")
 
 
-df = df.where(col('visitor_home_cbgs') != '{}')
+df_ft = df_ft.where(col('visitor_home_cbgs') != '{}')
+
 
 
 #get monthly visit for each location
-df_footprint = df.withColumn('year', split(col('date_range_start'),'-').getItem(0))\
+df_footprint = df_ft.withColumn('year', split(col('date_range_start'),'-').getItem(0))\
         .withColumn('year', col('year').cast(IntegerType()))\
         .withColumn('month', split(col('date_range_start'),'-').getItem(1))\
         .withColumn('month', col('month').cast(IntegerType()))\
         .withColumn('raw_visit_counts', col('raw_visit_counts').cast(IntegerType()))\
-        .select('safegraph_place_id','year','month','raw_visit_counts')
-
-df_mapping = spark.read.format("jdbc")\
-        .option("url", "jdbc:postgresql://10.0.0.10:5432/poi_db")\
-        .option("dbtable", "mapping_tb")\
-        .option("user", "postgres")\
-        .option('password','postgres')\
-        .option("driver", "org.postgresql.Driver")\
-        .load()
+        .select('safegraph_place_id','year','month','raw_visit_counts')\
+        .orderBy('safegraph_place_id')\
+        .withColumn('footprint_id',monotonically_increasing_id())
 
 
-df_footprint_mapped = df_footprint.join(df_mapping, df_footprint.safegraph_place_id == df_mapping.sg_id, 'inner')\
-        .withColumn('footprint_id',monotonically_increasing_id())\
-        .select('footprint_id','id','year','month','raw_visit_counts')
-
-df_footprint_mapped.write\
+df_footprint.write\
         .format('jdbc')\
         .mode('overwrite')\
         .option('url', 'jdbc:postgresql://10.0.0.10:5432/poi_db')\
@@ -104,9 +109,8 @@ df_footprint_mapped.write\
 
 
 
-
 #transform the dataset to get top 10 restaurants each census block residents visit most frequently. 
-df_by_id = df.groupby('safegraph_place_id').agg(collect_list(col('visitor_home_cbgs')).alias('merged'))
+df_by_id = df_ft.groupby('safegraph_place_id').agg(collect_list(col('visitor_home_cbgs')).alias('merged'))
 
 def get_cbgs_count(list_str):
     result = {}
@@ -130,10 +134,13 @@ window = Window.partitionBy(df_temp_3['cbgs']).orderBy(df_temp_3['sum(count)'].d
 
 df_top_restr = df_temp_3.select('*', rank().over(window).alias('rank')).filter(col('rank') <= 10).drop('rank')
 
-#find top 5 cbgs where most visitors reside for each restaurant
+
+
+#find top 10 cbgs where most visitors reside for each restaurant
 window_1 = Window.partitionBy(df_temp_2['safegraph_place_id']).orderBy(df_temp_2['count'].desc())
 
-df_top_cbgs = df_temp_2.select('*', rank().over(window_1).alias('rank')).filter(col('rank') <= 5).drop('rank')
+df_top_cbgs = df_temp_2.select('*', rank().over(window_1).alias('rank')).filter(col('rank') <= 10).drop('rank')
+
 
 df_top_restr = df_top_restr.withColumnRenamed('safegraph_place_id','competitor_id')
 df_top_cbgs = df_top_cbgs.withColumnRenamed('safegraph_place_id','restaurant_id')
@@ -156,20 +163,7 @@ df_output = df_join_tag_1.where(col('restaurant_cuisine') == col('competitor_cui
 df_comp_output = df_output.withColumn('id', monotonically_increasing_id())
 
 
-
-
 #save tables to postgres
-df_tag_output.write\
-        .format('jdbc')\
-        .mode('overwrite')\
-        .option('url', 'jdbc:postgresql://10.0.0.10:5432/poi_db')\
-        .option('dbtable', 'tag_tb')\
-        .option('user','postgres')\
-        .option('password', 'postgres')\
-        .option('driver','org.postgresql.Driver')\
-        .save()
-
-
 df_comp_output.write\
         .format('jdbc')\
         .mode('overwrite')\
@@ -179,20 +173,4 @@ df_comp_output.write\
         .option('password', 'postgres')\
         .option('driver','org.postgresql.Driver')\
         .save()
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
