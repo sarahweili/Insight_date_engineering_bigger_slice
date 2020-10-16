@@ -24,7 +24,8 @@ df_yelp = df_yelp_input.where(col('categories').contains('Restaurants'))
 
 
 ## select and process relevant columns
-df_sg = df_sg.select('safegraph_place_id', 'location_name','latitude', 'longitude', 'street_address', 'city', 'region','postal_code').where((col('location_name') !='')&(col('region') !='')&(col('postal_code') !='')&\
+df_sg = df_sg.select('safegraph_place_id', 'location_name','latitude', 'longitude', 'street_address', 'city', 'region','postal_code')\
+        .where((col('location_name') !='')&(col('region') !='')&(col('postal_code') !='')&\
         (col('latitude') !='')&(col('longitude') !=''))
 df_yelp = df_yelp.select('business_id', 'name', 'latitude', 'longitude', 'address','city', 'state', 'postal_code')\
         .where((col('name') !='')&(col('state') !='')&(col('postal_code') !='')&\
