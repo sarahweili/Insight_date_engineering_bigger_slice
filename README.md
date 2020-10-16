@@ -1,6 +1,7 @@
 # BiggerSlice - Insight DE Project
 *how to get a bigger slice of market in restaurant industry?*
 
+
 ## Problem
 Competition in restaurant industry is very fierce. There are about 1 million restaurants in the US, with 60 thousands openings and 50 thousands closing every year. So it is very important for restaurateurs to know who they are competing with and how they are doing. However, internal data is usually hard to locate.
 
