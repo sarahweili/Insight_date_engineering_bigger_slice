@@ -17,7 +17,7 @@ Built a data pipeline for restaurant competitor analysis by integrating alternat
 		- address
 		- postal_code
 		- state
-		- starts
+		- stars
 	- Review
 		- text
 - [SafeGraph Dataset](https://www.safegraph.com/covid-19-data-consortium)
@@ -30,13 +30,16 @@ Built a data pipeline for restaurant competitor analysis by integrating alternat
     	- region
     	- category_tags
     - Monthly place pattern (foot traffic)
-    	- raw_visit_counts: Number of visits to the POI during the date range.
-    	- visitor_home_cbgs: A mapping of census block groups to the number of visitors to the POI whose home is in that census block group.
+    	- raw_visit_counts: number of visits to the POI(point of interest) during the date range.
+    	- visitor_home_cbgs: a mapping of census block groups to the number of visitors to the POI whose home is in that census block group.
 
 ## Database Schema
 ![schema](/img/schema.jpg)
 
 ## Data Pipeline
 ![pipeline](/img/pipeline.jpg)
+
+## Demo
+[Tableau Dashboard](https://public.tableau.com/profile/wei.li6139#!/vizhome/shared/YT8MXDQSD)
 
 
