@@ -1,7 +1,7 @@
 from pyspark.sql import SparkSession, Row
 from pyspark.sql.functions import col, udf, concat
 from pyspark.sql.types import ArrayType, StringType, IntegerType, FloatType
-from nltk.corpus import stopwords
+#from nltk.corpus import stopwords
 from nltk.stem import WordNetLemmatizer
 import re as re
 from pyspark.ml.feature import CountVectorizer, IDF
@@ -12,18 +12,17 @@ import pandas as pd
 spark = SparkSession.builder.appName("review").getOrCreate()
 spark.sparkContext.setLogLevel("ERROR")
 
+
+
 df_bus = spark.read.json("s3a://yelp-reviews-data/yelp_academic_dataset_business.json")
 df_review = spark.read.json("s3a://yelp-reviews-data/yelp_academic_dataset_review.json")
-
 df_restr = df_bus.where(col('categories').contains('Restaurants'))
 df_review_f = df_review.where(col('text').isNotNull() & (col('useful') >4))
-
 df_reviews = df_review_f.join(df_restr, 'business_id', 'inner').select('business_id','text')
 
-#eng_stopwords = stopwords.words('english')
+
 
 # Stop words associated with location, wanted recommender to be location agnostic
-
 additional_stopwords = ['restaurant', 'vegas', 'waitress', 'dinner',
                         'wa', 'waiter', 'scottsdale', 'toronto',
                        'pittsburgh', 'madison', 'fremont', 'manager',
@@ -64,18 +63,15 @@ food_stopwords = ['chicken', 'curry', 'steak', 'egg', 'pork', 'meat',
                  'poutine', 'seabass', 'du', 'je', 'au', 'mais', 'très', 'asparagus',
                  'slider', 'tikka', 'naan', 'popcorn', 'masala', 'bonefish', 'lime']
 
-#all_stopwords = eng_stopwords+additional_stopwords+food_stopwords
-
 stopwords_rows = spark.read.option("header",True).csv("s3a://yelp-reviews-data/stopwords.csv").collect()
 stopwords = []
 for r in stopwords_rows:
     stopwords.append(r['stopword'])
-
 all_stopwords = stopwords+additional_stopwords+food_stopwords
-#print(all_stopwords)
 
-
+# lemmatizer
 lemmatizer = WordNetLemmatizer()
+# clean the text
 def preprocess_text(text):
     result = []
     for word in text.split(' '):
@@ -89,24 +85,19 @@ def preprocess_text(text):
 
 
 udf_preprocess_text = udf(preprocess_text, ArrayType(StringType()))
-
 df_clean = df_reviews.withColumn('review', udf_preprocess_text(col('text'))).select('business_id','review')
 
 
-
+#topic modeling
 cv = CountVectorizer(inputCol="review", outputCol="raw_features", vocabSize=5000, minDF=10.0)
 cvmodel = cv.fit(df_clean)
-
 result_cv = cvmodel.transform(df_clean)
-
 idf = IDF(inputCol="raw_features", outputCol="features")
 idfModel = idf.fit(result_cv)
 result_tfidf = idfModel.transform(result_cv)
-
 lda = LDA(k=9, maxIter=100).setTopicDistributionCol('topicDistributionCol')
 lda_model = lda.fit(result_tfidf.select('business_id','features'))
 transformed = lda_model.transform(result_tfidf.select('business_id','features'))
-
 topics = lda_model.describeTopics(maxTermsPerTopic=15)
 vocabArray = cvmodel.vocabulary
 topics = topics.toPandas()
@@ -122,11 +113,9 @@ print(topics_matrix)
 
 udf_to_array = udf(lambda v: v.toArray().tolist(), ArrayType(FloatType()))
 df_output_tmp = transformed.withColumn('topics', udf_to_array('topicDistributionCol'))
-
 df_output = df_output_tmp.select('business_id', col('topics')[0], col('topics')[1], col('topics')[2]\
         ,col('topics')[3], col('topics')[4], col('topics')[5], col('topics')[6], col('topics')[7]\
        ,col('topics')[8]).groupby('business_id').mean()
-
 
 
 

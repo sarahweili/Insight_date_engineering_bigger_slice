@@ -11,6 +11,8 @@ import Levenshtein as lev
 spark = SparkSession.builder.appName("mapping").getOrCreate()
 spark.sparkContext.setLogLevel("ERROR")
 
+
+
 ## read poi datasets
 df_sg_input = spark.read.option("header",True).option("escape", '"').csv("s3a://sg-poi-data/poi-data/*.csv")
 df_sg = df_sg_input.where(df_sg_input.naics_code.like('7225%'))
@@ -24,27 +26,20 @@ df_yelp = df_yelp_input.where(col('categories').contains('Restaurants'))
 ## select and process relevant columns
 df_sg = df_sg.select('safegraph_place_id', 'location_name','latitude', 'longitude', 'street_address', 'city', 'region','postal_code').where((col('location_name') !='')&(col('region') !='')&(col('postal_code') !='')&\
         (col('latitude') !='')&(col('longitude') !=''))
-
-print('safegraph:', df_sg.count())
-
 df_yelp = df_yelp.select('business_id', 'name', 'latitude', 'longitude', 'address','city', 'state', 'postal_code')\
         .where((col('name') !='')&(col('state') !='')&(col('postal_code') !='')&\
         (col('latitude').isNotNull())&(col('longitude').isNotNull()))
-
-print('yelp', df_yelp.count())
-
 df_sg = df_sg.withColumnRenamed('postal_code','sg_postal_code')\
         .withColumnRenamed('latitude','sg_latitude')\
         .withColumnRenamed('longitude','sg_longitude')\
         .withColumnRenamed('city','sg_city')
-
 df_sg = df_sg.withColumn('sg_latitude', col('sg_latitude').cast("float"))\
         .withColumn('sg_longitude', col('sg_longitude').cast("float"))
-
 df_yelp = df_yelp.withColumn('latitude', col('latitude').cast("float"))\
         .withColumn('longitude', col('longitude').cast("float"))
    
    
+
    
 ## step 1: join poi and yelp datasets on state and zip_code
 df_s_zip = df_yelp.join(df_sg, (df_sg.region == df_yelp.state) & (df_sg.sg_postal_code==df_yelp.postal_code), 'inner')
@@ -52,7 +47,6 @@ df_s_zip = df_yelp.join(df_sg, (df_sg.region == df_yelp.state) & (df_sg.sg_posta
 
 
 ## step 2: calculate geo distance within each group
-
 ## define the function to calculate distance between two geo locations
 def get_distance(longit_a, latit_a, longit_b, latit_b):
     longit_a, latit_a, longit_b, latit_b = map(radians, [longit_a,  latit_a, longit_b, latit_b])
@@ -65,24 +59,20 @@ def get_distance(longit_a, latit_a, longit_b, latit_b):
     return abs(round(distance, 2))
 
 udf_get_distance = udf(get_distance, FloatType())
-
-
-## add distance column
 df_distance = df_s_zip.withColumn('distance', udf_get_distance(col('sg_longitude'), col('sg_latitude'), col('longitude'), col('latitude')))
-
-
 ## get pairs with the  distance less than 2
 df_d50 = df_distance.where(col('distance') <=2)
 
 
 
-## step 3: match location names
 
+## step 3: match location names
 ## define common words in restaurant names
 stopwords=['restaurant','restaurants','pizza','grill','bar','the','and','cafe','kitchen','house','food','mexican','la'\
         ,'cuisine','bistro','thai','taco','burger','express','of','bbq','pizzeria','deli','bakery','pub','chinese'\
         'chicken','el','lounge','italian','coffee','shop','pho','café','le','buffet','tavern','market','steakhouse'\
         ,'on','diner','a', 'de', 'n', 'at']
+
 
 
 # process the names
@@ -97,11 +87,8 @@ def process_name(name):
     return result
 
 udf_process_name = udf(process_name, ArrayType(StringType()))
-
-
 df_name = df_d50.withColumn('sg_name', udf_process_name(col('location_name')))\
         .withColumn('yelp_name', udf_process_name(col('name'))).where((size(col('sg_name'))>=1) & (size(col('yelp_name'))>=1))
-
 
 ## define function to match the first word (keyword of the name)
 def match_first_word(list_1, list_2):
@@ -115,22 +102,17 @@ def match_first_word(list_1, list_2):
     else:
         return 0
 
-
 udf_match_first_word = udf(match_first_word, IntegerType())
-
-
 df_name = df_name.withColumn('first_word', udf_match_first_word(col('yelp_name'), col('sg_name'))).where(col('first_word') == 1)
+
+
 
 
 ## step 4: calculate overlap word percentage
 df_name = df_name.withColumn('name_length', size(col('yelp_name')))
-
 df_temp = df_name.withColumn("id_new", monotonically_increasing_id()).withColumn('word', explode('yelp_name'))
-
 word_match = udf(lambda a, b: 0 if a in b else 1, IntegerType())
-
 df_temp = df_temp.withColumn('match', word_match('word','sg_name'))
-
 df_match = df_temp.groupBy('id_new').agg(sum("match").alias('unique_count')\
         ,first("safegraph_place_id").alias('sg_id')\
         ,first('location_name').alias('sg_org_name')\
@@ -141,15 +123,11 @@ df_match = df_temp.groupBy('id_new').agg(sum("match").alias('unique_count')\
         ,first('distance').alias('distance')\
         ,first('name_length').alias('name_length'))\
         .orderBy('id_new', ascending=True)
-
 get_unique_pct = udf(lambda a, b: round(a/b, 2), FloatType())
-
 df_match = df_match.withColumn('match_p', get_unique_pct('unique_count', 'name_length'))
-
 
 ## get the pair that has most overlapped words and shortest distance
 w1 = Window.partitionBy('yelp_id')
-
 df_result = df_match.withColumn('best_match', min('match_p').over(w1))\
     .where(col('match_p') == col('best_match'))\
     .withColumn('min_distance', min('distance').over(w1))\
@@ -166,6 +144,7 @@ result = df_result.select('sg_id','yelp_id').orderBy('yelp_id').withColumn('id',
 
 
 
+
 ## write to postgresql
 result.write.format('jdbc')\
         .mode('overwrite')\
@@ -177,13 +156,10 @@ result.write.format('jdbc')\
         .save()
 
 
+
 ## test the result
-n = df_result.count()
-print('total: ', n)
-
+#n = df_result.count()
 #test = df_result.sample(True, 0.005, 1234)
-
-
 
 ## read from postgresql
 #label_test = spark.read.format("jdbc")\
@@ -193,9 +169,7 @@ print('total: ', n)
 #        .option('password','postgres')\
 #        .option("driver", "org.postgresql.Driver")\
 #        .load()
-
 #test = label_test.select('yelp_id').join(df_result, 'yelp_id', 'left')
-
 
 ## write test to postgresql
 #test.write.format('jdbc')\
